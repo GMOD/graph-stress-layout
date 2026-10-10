@@ -19,6 +19,7 @@
     "stress"
   ],
   "type": "module",
+  "packageManager": "pnpm@11.20.0",
   "exports": {
     ".": "./src/index.ts"
   },
