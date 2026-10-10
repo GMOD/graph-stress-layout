@@ -44,6 +44,19 @@ const { nodePositions } = stressLayout(
 )
 ```
 
+## See also
+
+- [@jbrowse/bandage-core](https://github.com/GMOD/bandage-core) - Bandage layout
+  and drawing engine
+- [BandageJS](https://github.com/cmdcolin/BandageJS) - standalone page for GFA
+  and gbz-base graphs
+- [jbrowse-plugin-graphgenomeviewer](https://github.com/GMOD/jbrowse-plugin-graphgenomeviewer) -
+  JBrowse 2 plugin that browses these graphs by locus
+
+Tutorials on [jbrowse.org](https://jbrowse.org/jb2/docs/tutorials/)
+
+- [HPRC part 3: repeat lengths](https://jbrowse.org/jb2/docs/tutorials/pangenome_hprc_repeats/)
+
 ## LICENSE
 
 MIT
