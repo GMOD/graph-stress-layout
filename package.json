@@ -1,6 +1,6 @@
 {
   "name": "@jbrowse/graph-stress-layout",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Stress layout of a sequence graph by walk-guided SGD in plain JS: nodes as chains of points, a reference backbone held straight, a polyline per node out",
   "license": "MIT",
   "author": {
