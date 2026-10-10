@@ -50,6 +50,8 @@ const { nodePositions } = stressLayout(
   and drawing engine
 - [BandageJS](https://github.com/cmdcolin/BandageJS) - standalone page for GFA
   and gbz-base graphs
+- [ggbandage](https://github.com/GMOD/ggbandage) - Bandage-style graph figures
+  as ggplot2 layers
 - [jbrowse-plugin-graphgenomeviewer](https://github.com/GMOD/jbrowse-plugin-graphgenomeviewer) -
   JBrowse 2 plugin that browses these graphs by locus
 
