@@ -178,6 +178,17 @@ function tilted(flat: Flat, c: number, angle: number): Flat {
   }
 }
 
+// whether any of the flat curve lies behind its frame: a loop's top poking
+// up through the reference line, which read as a glitch on every walk panel
+function behindFrame(flat: Flat) {
+  for (let i = 0; i <= 32; i++) {
+    if (flat.at((flat.length * i) / 32).v < -1e-6) {
+      return true
+    }
+  }
+  return false
+}
+
 function lineFlat(
   u0: number,
   v0: number,
@@ -506,9 +517,9 @@ class Placer {
   }
 
   // The first candidate that clears what is drawn, else the least crowded.
-  // Skipping candidates that swing behind the frame cut node crossings on
-  // the KIV-2 eight-haplotype cut 23 to 13 and raised link crossings 349 to
-  // 469 at twice the time.
+  // Exempting only the feet of pieces at the same anchor, or adding
+  // candidates with legs splayed a lane or more out from the anchors, moved
+  // no count that mattered on the HPRC cuts.
   private choose(
     candidates: (() => Mapped)[],
     exempt: Curve | undefined,
@@ -697,7 +708,8 @@ class Placer {
       for (const tilt of tilts) {
         for (let i = 0; i <= 16; i++) {
           const h = (hMax * i) / 16
-          if (i < 16 && arcFlat(c, L, h, drop).apex < MIN_DEPTH) {
+          const flat = tilted(arcFlat(c, L, h, drop), c, tilt)
+          if ((i < 16 && flat.apex < MIN_DEPTH) || behindFrame(flat)) {
             continue
           }
           candidates.push(() =>
