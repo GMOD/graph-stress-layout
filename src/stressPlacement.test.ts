@@ -161,13 +161,18 @@ test('a short allele over a wide gap hangs deeper than one over a narrow gap', (
   expect(wide).toBeGreaterThan(narrow + 50)
 })
 
-test('a second loop over the same gap leans aside without rising above the backbone', () => {
+test('a second loop over the same gap nests inside the first, feet at the anchors, neither above the backbone', () => {
   const request = withAllele('a', 600)
   request.graph.nodes.push({ id: 'b', length: 400 })
   request.graph.edges.push({ from: 'v1', to: 'b' }, { from: 'b', to: 'v3' })
   const { points } = placed(request)
-  for (const id of ['a', 'b']) {
-    for (const p of points(id)) {
+  const a = points('a')
+  const b = points('b')
+  expect(segmentsCross(a, b)).toBe(false)
+  for (const loop of [a, b]) {
+    expect(Math.hypot(loop[0]!.x - 100, loop[0]!.y)).toBeLessThan(15)
+    expect(Math.hypot(loop.at(-1)!.x - 210, loop.at(-1)!.y)).toBeLessThan(15)
+    for (const p of loop) {
       expect(p.y).toBeGreaterThanOrEqual(-1e-6)
     }
   }

@@ -23,8 +23,9 @@ const MIN_DEPTH = 12
 const LANE_GAP = 15
 const CLEAR = LANE_GAP * 0.7
 const TIP_ANGLE = (25 * Math.PI) / 180
-const ROUTE_BOW = 0.25
-const ROUTE_CAP = 150
+// how deep a deletion arch rises, or a short bar hangs, per unit of its gap
+const BOW = 0.25
+const BOW_CAP = 150
 // a teardrop beside another leans away from it rather than dropping
 const TEARDROP_TILTS = [0, -0.35, 0.35, -0.7, 0.7]
 const SIDES: Side[] = [0, 1]
@@ -109,8 +110,23 @@ function polylineLength(pts: Point[]) {
   return arcLengths(pts)[pts.length - 1] ?? 0
 }
 
-// arc angle theta in (0, 2pi) with L/c = theta / (2 sin(theta/2))
+// arc angle theta in (0, 2pi) with L/c = theta / (2 sin(theta/2)); a piece's
+// candidates ask for a handful of ratios hundreds of times
+const arcAngles = new Map<number, number>()
 function arcAngle(ratio: number) {
+  const known = arcAngles.get(ratio)
+  if (known !== undefined) {
+    return known
+  }
+  const angle = solveArcAngle(ratio)
+  if (arcAngles.size > 10_000) {
+    arcAngles.clear()
+  }
+  arcAngles.set(ratio, angle)
+  return angle
+}
+
+function solveArcAngle(ratio: number) {
   let lo = 1e-6
   let hi = 2 * Math.PI - 1e-6
   for (let i = 0; i < 60; i++) {
@@ -159,9 +175,10 @@ function arcFlat(c: number, length: number, h: number, drop: number): Flat {
   }
 }
 
-// The flat curve rotated about its chord's midpoint. A shear along the frame
-// keeps the feet at the anchors, but swings a deep loop further across its
-// neighbours: 342 to 516 link crossings on the KIV-2 eight-haplotype cut.
+// The flat curve rotated about its chord's midpoint, which moves its feet
+// off the anchors by (c/2) sin(angle): one up, one down. A shear that kept
+// the feet swung a deep loop across its neighbours and raised link crossings
+// by half on the KIV-2 eight-haplotype cut.
 function tilted(flat: Flat, c: number, angle: number): Flat {
   if (!angle) {
     return flat
@@ -294,9 +311,16 @@ function outwardNormals(pts: Point[], outRef: Point[]): Point[] {
   })
 }
 
-// the flat curve carried into the frame from arc length tA, outward by sign
-function mapFlat(frame: Curve, tA: number, sign: number, flat: Flat): Mapped {
-  const ds = Math.min(5, Math.max(flat.length / 24, 0.5))
+// the flat curve carried into the frame from arc length tA, outward by sign,
+// sampled every `step` at most
+function mapFlat(
+  frame: Curve,
+  tA: number,
+  sign: number,
+  flat: Flat,
+  step: number,
+): Mapped {
+  const ds = Math.min(step, Math.max(flat.length / 24, 0.5))
   const pts: Point[] = []
   const refs: Point[] = []
   for (let t = 0; t <= flat.length + 1e-9; t += ds) {
@@ -311,26 +335,35 @@ function mapFlat(frame: Curve, tA: number, sign: number, flat: Flat): Mapped {
   return { pts, refs }
 }
 
-// the flat curve whose image in a curved frame has the asked length
+// A candidate drawing, sampled coarsely for the clearance check and at full
+// density once chosen
+type Candidate = (step: number) => Mapped
+
+const FINE_STEP = 5
+const COARSE_STEP = CLEAR / 2
+
+// the flat curve whose image in a curved frame has the asked length, within
+// a tenth of a percent or six tries
 function fitted(
   frame: Curve,
   tA: number,
   sign: number,
   make: (length: number) => Flat,
   length: number,
+  step: number,
 ): Mapped {
   let flatLength = length
-  let mapped = mapFlat(frame, tA, sign, make(flatLength))
+  let mapped = mapFlat(frame, tA, sign, make(flatLength), step)
   if (frame.straight) {
     return mapped
   }
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < 6; i++) {
     const got = polylineLength(mapped.pts)
-    if (!(got > 0)) {
+    if (!(got > 0) || Math.abs(got / length - 1) < 1e-3) {
       break
     }
     flatLength *= length / got
-    mapped = mapFlat(frame, tA, sign, make(flatLength))
+    mapped = mapFlat(frame, tA, sign, make(flatLength), step)
   }
   return mapped
 }
@@ -435,6 +468,9 @@ class Placer {
         free.push(k)
       }
     }
+    // narrow pieces first, short before long, except that pieces on the same
+    // feet go longest first so an inner loop nests inside the outer one rather
+    // than crossing it
     const pieces = this.componentsOf(free)
       .map(members => ({ members, anchors: this.anchorsOf(members) }))
       .filter(p => p.anchors.length)
@@ -442,8 +478,16 @@ class Placer {
         members: p.members,
         span: spanOf(p.anchors),
         drawn: p.members.reduce((s, k) => s + this.drawn(k), 0),
+        feet: p.anchors
+          .map(a => `${a.point.x},${a.point.y}`)
+          .sort()
+          .join(' '),
       }))
-      .sort((a, b) => a.span - b.span || a.drawn - b.drawn)
+      .sort(
+        (a, b) =>
+          a.span - b.span ||
+          (a.feet === b.feet ? b.drawn - a.drawn : a.drawn - b.drawn),
+      )
     for (const p of pieces) {
       this.placePiece(p.members, this.backboneCentroid)
     }
@@ -521,24 +565,28 @@ class Placer {
   // candidates with legs splayed a lane or more out from the anchors, moved
   // no count that mattered on the HPRC cuts.
   private choose(
-    candidates: (() => Mapped)[],
+    candidates: Candidate[],
     exempt: Curve | undefined,
     anchorPts: Point[],
   ) {
-    let best: Mapped | undefined
+    let best: Candidate | undefined
     let bestV = Infinity
     for (const candidate of candidates) {
-      const m = candidate()
-      const v = this.violations(m.pts, exempt, anchorPts, bestV)
+      const v = this.violations(
+        candidate(COARSE_STEP).pts,
+        exempt,
+        anchorPts,
+        bestV,
+      )
       if (v === 0) {
-        return m
+        return candidate(FINE_STEP)
       }
       if (v < bestV) {
         bestV = v
-        best = m
+        best = candidate
       }
     }
-    return best!
+    return best!(FINE_STEP)
   }
 
   private anchorsOf(members: number[]): Anchor[] {
@@ -703,7 +751,7 @@ class Placer {
   ) {
     const hMax = (L - c) / 2 - 1e-6
     const tilts = L > 2 * c ? TEARDROP_TILTS : [0]
-    const candidates: (() => Mapped)[] = []
+    const candidates: Candidate[] = []
     for (const drop of depths(0, 8)) {
       for (const tilt of tilts) {
         for (let i = 0; i <= 16; i++) {
@@ -712,7 +760,7 @@ class Placer {
           if ((i < 16 && flat.apex < MIN_DEPTH) || behindFrame(flat)) {
             continue
           }
-          candidates.push(() =>
+          candidates.push(step =>
             fitted(
               frame,
               tA,
@@ -729,6 +777,7 @@ class Placer {
                   tilt,
                 ),
               L,
+              step,
             ),
           )
         }
@@ -763,7 +812,7 @@ class Placer {
       // stretched the junction nodes across the gap instead: on the KIV-2
       // eight-haplotype cut, chain length error 0.3% to 57% and node
       // crossings 22 to 48. Hanging the piece on the curve with most anchors
-      // took that cut's link crossings from 342 to 805.
+      // more than doubled that cut's link crossings.
       anchors.sort((a, b) => a.point.x - b.point.x || a.point.y - b.point.y)
       const a = anchors[0]!.point
       const b = anchors[anchors.length - 1]!.point
@@ -786,7 +835,7 @@ class Placer {
     const single =
       anchors.length === 1 || (A.u === B.u && A.uSide === B.uSide && c < 1e-9)
     const anchorPts = [A.point, B.point]
-    const pick = (candidates: (() => Mapped)[]) =>
+    const pick = (candidates: Candidate[]) =>
       this.choose(candidates, shared, anchorPts)
     let spine: SpineStep[]
     let mapped: Mapped
@@ -803,13 +852,14 @@ class Placer {
       const dv = Math.sin(TIP_ANGLE)
       mapped = pick(
         depths(0, 12).map(
-          drop => () =>
+          drop => (step: number) =>
             fitted(
               frame,
               tA,
               sign,
               length => lineFlat(0, drop, du, dv, length),
               L,
+              step,
             ),
         ),
       )
@@ -819,11 +869,17 @@ class Placer {
         this.loosePath(members, A.u, B.u)
       const L = this.spineLength(spine)
       if (route) {
-        const d0 = Math.max(MIN_DEPTH, Math.min(ROUTE_BOW * c, ROUTE_CAP))
+        const d0 = Math.max(MIN_DEPTH, Math.min(BOW * c, BOW_CAP))
         mapped = pick(
           depths(d0, 12).map(
-            d => () =>
-              mapFlat(frame, tA, sign, arcFlat(c, archLength(c, d), 0, 0)),
+            d => (step: number) =>
+              mapFlat(
+                frame,
+                tA,
+                sign,
+                arcFlat(c, archLength(c, d), 0, 0),
+                step,
+              ),
           ),
         )
         const total = polylineLength(mapped.pts)
@@ -832,19 +888,17 @@ class Placer {
         mapped = pick(this.arcCandidates(frame, tA, sign, c, L))
       } else {
         const bar = L - 2 * link
-        const d0 = Math.max(
-          MIN_DEPTH,
-          Math.min(ROUTE_BOW * (c - bar), ROUTE_CAP),
-        )
+        const d0 = Math.max(MIN_DEPTH, Math.min(BOW * (c - bar), BOW_CAP))
         mapped = pick(
           depths(d0, 12).map(
-            d => () =>
+            d => (step: number) =>
               fitted(
                 frame,
                 tA,
                 sign,
                 length => lineFlat(c / 2 - length / 2, d, 1, 0, length),
                 bar,
+                step,
               ),
           ),
         )
