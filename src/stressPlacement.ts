@@ -159,7 +159,9 @@ function arcFlat(c: number, length: number, h: number, drop: number): Flat {
   }
 }
 
-// the flat curve rotated about its chord's midpoint
+// The flat curve rotated about its chord's midpoint. A shear along the frame
+// keeps the feet at the anchors, but swings a deep loop further across its
+// neighbours: 342 to 516 link crossings on the KIV-2 eight-haplotype cut.
 function tilted(flat: Flat, c: number, angle: number): Flat {
   if (!angle) {
     return flat
@@ -503,7 +505,10 @@ class Placer {
     return n
   }
 
-  // the first candidate that clears what is drawn, else the least crowded
+  // The first candidate that clears what is drawn, else the least crowded.
+  // Skipping candidates that swing behind the frame cut node crossings on
+  // the KIV-2 eight-haplotype cut 23 to 13 and raised link crossings 349 to
+  // 469 at twice the time.
   private choose(
     candidates: (() => Mapped)[],
     exempt: Curve | undefined,
@@ -745,7 +750,8 @@ class Placer {
       // Relaxing just these pieces over their links with the rest held
       // stretched the junction nodes across the gap instead: on the KIV-2
       // eight-haplotype cut, chain length error 0.3% to 57% and node
-      // crossings 22 to 48.
+      // crossings 22 to 48. Hanging the piece on the curve with most anchors
+      // took that cut's link crossings from 342 to 805.
       anchors.sort((a, b) => a.point.x - b.point.x || a.point.y - b.point.y)
       const a = anchors[0]!.point
       const b = anchors[anchors.length - 1]!.point
