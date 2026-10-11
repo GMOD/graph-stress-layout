@@ -19,8 +19,12 @@ import type {
 // straight and in order without pinning it. Stress has no repulsion, so a
 // final pass pushes apart points that are close but not joined.
 //
-// An anchored graph starts from stressPlacement's drawing and enters the
-// schedule part way, where the steps are small enough to keep its shape.
+// A component with a backbone is drawn by stressPlacement and skips the
+// schedule. Walks from a loop's leg run on along the backbone, so the
+// schedule pulls each leg to lie along the reference on its own side and the
+// legs cross at the neck; on HPRC MHC class II it turned 80 clean alleles
+// into twisted lollipops, and starting it late in the schedule, stopping
+// walks at the backbone, or the untangle pass alone each left the crossings.
 
 // walks per point and iterations by the quality the request names
 const QUALITY = [
@@ -279,6 +283,19 @@ export function stressLayout(
       Y[i] = rand() * side
     }
   }
+  // the points the schedule moves: those of components the placement did not
+  // draw whole
+  const loose: number[] = []
+  let looseSeeded = true
+  for (const points of members) {
+    if (placed && points.every(i => !Number.isNaN(placed.X[i]))) {
+      continue
+    }
+    for (const i of points) {
+      loose.push(i)
+      looseSeeded &&= !Number.isNaN(seedX[i])
+    }
+  }
   // each component's reference points by seed x, for the reference term
   const refIdx = members.map(points =>
     Int32Array.from(
@@ -397,21 +414,17 @@ export function stressLayout(
     }
   }
 
-  const order = new Int32Array(n)
-  for (let i = 0; i < n; i++) {
-    order[i] = i
-  }
-  const warm = anySeed ? Math.floor(WARM * iterations) : 0
+  const order = Int32Array.from(loose)
+  const warm = loose.length && looseSeeded ? Math.floor(WARM * iterations) : 0
   for (let t = warm; t < iterations; t++) {
     const eta = etaMax * Math.exp(-lambda * t)
-    for (let k = n - 1; k > 0; k--) {
+    for (let k = order.length - 1; k > 0; k--) {
       const r = Math.floor(rand() * (k + 1))
       const tmp = order[k]!
       order[k] = order[r]!
       order[r] = tmp
     }
-    for (let q = 0; q < n; q++) {
-      const i = order[q]!
+    for (const i of order) {
       adjacentTerms(i, eta)
       for (let w = 0; w < walks; w++) {
         const length = Math.exp(logMin + rand() * (logMax - logMin))
@@ -430,9 +443,9 @@ export function stressLayout(
   const radius = UNTANGLE_LINKS * link
   const key = (x: number, y: number) =>
     (Math.floor(x / radius) * 73856093) ^ (Math.floor(y / radius) * 19349663)
-  for (let u = 0; u < UNTANGLE_PASSES; u++) {
+  for (let u = 0; u < (loose.length ? UNTANGLE_PASSES : 0); u++) {
     const grid = new Map<number, number[]>()
-    for (let i = 0; i < n; i++) {
+    for (const i of loose) {
       const k = key(X[i]!, Y[i]!)
       const list = grid.get(k)
       if (list) {
@@ -441,7 +454,7 @@ export function stressLayout(
         grid.set(k, [i])
       }
     }
-    for (let i = 0; i < n; i++) {
+    for (const i of loose) {
       const cx = Math.floor(X[i]! / radius)
       const cy = Math.floor(Y[i]! / radius)
       for (let gx = cx - 1; gx <= cx + 1; gx++) {
@@ -488,7 +501,7 @@ export function stressLayout(
         }
       }
     }
-    for (let i = 0; i < n; i++) {
+    for (const i of loose) {
       adjacentTerms(i, Infinity)
       referenceTerm(i, etaMin * 4)
     }
@@ -526,8 +539,11 @@ export function stressLayout(
 }
 
 // Points a to a+m-1 moved to equal spacing along their polyline. Smoothing
-// shortens a curve, so the ends first extend along their tangents by half
-// the loss each, and the points then take their full spacing.
+// shortens a curve, so the interior first bulges out from the chord between
+// the ends until the length is back, and the points then take their full
+// spacing. The ends stay: extending them along their tangents instead ran a
+// node's ends past its anchors and through the links there, 13 of MHC class
+// II's 32 node crossings.
 function respace(
   X: Float64Array,
   Y: Float64Array,
@@ -535,56 +551,94 @@ function respace(
   m: number,
   per: number,
 ) {
-  const arc = new Float64Array(m)
-  for (let i = 1; i < m; i++) {
-    arc[i] =
-      arc[i - 1]! +
-      Math.hypot(X[a + i]! - X[a + i - 1]!, Y[a + i]! - Y[a + i - 1]!)
-  }
-  if (!arc[m - 1]) {
-    return
-  }
-  const loss = per * (m - 1) - arc[m - 1]!
-  if (loss > 0) {
-    extend(X, Y, a, a + 1, loss / 2)
-    extend(X, Y, a + m - 1, a + m - 2, loss / 2)
+  const arc = (out: Float64Array) => {
     for (let i = 1; i < m; i++) {
-      arc[i] =
-        arc[i - 1]! +
+      out[i] =
+        out[i - 1]! +
         Math.hypot(X[a + i]! - X[a + i - 1]!, Y[a + i]! - Y[a + i - 1]!)
     }
+    return out
   }
-  const total = arc[m - 1]!
+  const lengths = arc(new Float64Array(m))
+  if (!lengths[m - 1]) {
+    return
+  }
+  if (bulge(X, Y, a, m, per * (m - 1))) {
+    arc(lengths)
+  }
+  const total = lengths[m - 1]!
   const xs = X.slice(a, a + m)
   const ys = Y.slice(a, a + m)
   let seg = 1
   for (let i = 1; i + 1 < m; i++) {
     const s = (total * i) / (m - 1)
-    while (seg < m - 1 && arc[seg]! < s) {
+    while (seg < m - 1 && lengths[seg]! < s) {
       seg++
     }
-    const span = arc[seg]! - arc[seg - 1]!
-    const t = span > 0 ? (s - arc[seg - 1]!) / span : 0
+    const span = lengths[seg]! - lengths[seg - 1]!
+    const t = span > 0 ? (s - lengths[seg - 1]!) / span : 0
     X[a + i] = xs[seg - 1]! + (xs[seg]! - xs[seg - 1]!) * t
     Y[a + i] = ys[seg - 1]! + (ys[seg]! - ys[seg - 1]!) * t
   }
 }
 
-// moves point `end` away from `next` by `by`
-function extend(
+// Interior points a+1 to a+m-2 pushed out from the chord between the ends,
+// their offsets from it scaled by one factor, until the polyline is `target`
+// long. A chain lying along its chord has nothing to push and keeps its
+// length. True when it moved anything.
+function bulge(
   X: Float64Array,
   Y: Float64Array,
-  end: number,
-  next: number,
-  by: number,
+  a: number,
+  m: number,
+  target: number,
 ) {
-  const dx = X[end]! - X[next]!
-  const dy = Y[end]! - Y[next]!
-  const mag = Math.hypot(dx, dy)
-  if (mag > 0) {
-    X[end] = X[end]! + (dx / mag) * by
-    Y[end] = Y[end]! + (dy / mag) * by
+  const b = a + m - 1
+  const cx = X[a]!
+  const cy = Y[a]!
+  const chord = Math.hypot(X[b]! - cx, Y[b]! - cy)
+  const ux = chord > 1e-9 ? (X[b]! - cx) / chord : 1
+  const uy = chord > 1e-9 ? (Y[b]! - cy) / chord : 0
+  const along = new Float64Array(m)
+  const off = new Float64Array(m)
+  let flat = true
+  for (let i = 0; i < m; i++) {
+    const dx = X[a + i]! - cx
+    const dy = Y[a + i]! - cy
+    along[i] = dx * ux + dy * uy
+    off[i] = dy * ux - dx * uy
+    flat &&= Math.abs(off[i]!) < 1e-6
   }
+  const lengthAt = (f: number) => {
+    let total = 0
+    for (let i = 1; i < m; i++) {
+      total += Math.hypot(along[i]! - along[i - 1]!, f * (off[i]! - off[i - 1]!))
+    }
+    return total
+  }
+  if (flat || lengthAt(1) >= target) {
+    return false
+  }
+  let lo = 1
+  let hi = 2
+  while (lengthAt(hi) < target && hi < 1e6) {
+    lo = hi
+    hi *= 2
+  }
+  for (let it = 0; it < 40; it++) {
+    const mid = (lo + hi) / 2
+    if (lengthAt(mid) < target) {
+      lo = mid
+    } else {
+      hi = mid
+    }
+  }
+  const f = (lo + hi) / 2
+  for (let i = 1; i + 1 < m; i++) {
+    X[a + i] = cx + along[i]! * ux - f * off[i]! * uy
+    Y[a + i] = cy + along[i]! * uy + f * off[i]! * ux
+  }
+  return true
 }
 
 // Components stacked top to bottom, left aligned, `gap` apart. A component

@@ -63,3 +63,57 @@ test('a seeded backbone lays out as a line in reference order, the same way twic
   expect(along).toBeGreaterThan(4 * across)
   expect(nodePositions.ins!.length).toBeGreaterThan(2)
 })
+
+const polylineLength = (points: { x: number; y: number }[]) =>
+  points.reduce(
+    (sum, p, i) =>
+      i ? sum + Math.hypot(p.x - points[i - 1]!.x, p.y - points[i - 1]!.y) : 0,
+    0,
+  )
+
+test('an anchored graph keeps its placement: the backbone exactly straight, the insertion hanging below it at its own length between its anchors', () => {
+  const { nodePositions } = stressLayout(seedBackbone(anchored()))
+  for (const id of ['v1', 'v2', 'v3']) {
+    for (const p of nodePositions[id]!) {
+      expect(p.y).toBe(0)
+    }
+  }
+  const ins = nodePositions.ins!
+  const v1End = nodePositions.v1!.at(-1)!
+  const v3Start = nodePositions.v3![0]!
+  expect(Math.hypot(ins[0]!.x - v1End.x, ins[0]!.y - v1End.y)).toBeLessThan(20)
+  expect(
+    Math.hypot(ins.at(-1)!.x - v3Start.x, ins.at(-1)!.y - v3Start.y),
+  ).toBeLessThan(20)
+  for (const p of ins) {
+    expect(p.y).toBeGreaterThanOrEqual(0)
+  }
+  expect(polylineLength(ins) / 400).toBeGreaterThan(0.98)
+  expect(polylineLength(ins) / 400).toBeLessThan(1.02)
+})
+
+test('a graph with no backbone lays out from a random start, the same way twice', () => {
+  const request: StressRequest = {
+    graph: {
+      nodes: [
+        { id: 'a', length: 100 },
+        { id: 'b', length: 100 },
+        { id: 'c', length: 300 },
+      ],
+      edges: [
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'c' },
+        { from: 'c', to: 'a' },
+      ],
+    },
+    options: anchored().options,
+  }
+  const { nodePositions } = stressLayout(request)
+  expect(stressLayout(request).nodePositions).toEqual(nodePositions)
+  for (const line of Object.values(nodePositions)) {
+    for (const p of line) {
+      expect(Number.isFinite(p.x) && Number.isFinite(p.y)).toBe(true)
+    }
+  }
+  expect(polylineLength(nodePositions.c!) / 300).toBeGreaterThan(0.9)
+})

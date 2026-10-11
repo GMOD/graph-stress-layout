@@ -12,8 +12,11 @@ Key characteristics
   polyline per node.
 
 - A node of rank 0 is the reference backbone. Seeded along x, the backbone is
-  held straight and in reference order, and the rest of the graph starts from a
-  structural placement against it (`stressPlacement`).
+  held straight and in reference order, and the rest of the graph is drawn
+  against it by a structural placement (`stressPlacement`): an allele as a lens
+  under its gap, a longer one as a teardrop, a deletion as an arch, and nested
+  pieces on the outside of their parent's curve. A component with a backbone
+  keeps that drawing; the stress schedule lays out the components without one.
 
 ## Example
 

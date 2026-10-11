@@ -740,6 +740,11 @@ class Placer {
       tB = anchors[anchors.length - 1]!.t
       sign = frame === this.backbone && route ? -1 : 1
     } else {
+      // A piece between curves hangs on the chord, and its links stay long.
+      // Relaxing just these pieces over their links with the rest held
+      // stretched the junction nodes across the gap instead: on the KIV-2
+      // eight-haplotype cut, chain length error 0.3% to 57% and node
+      // crossings 22 to 48.
       anchors.sort((a, b) => a.point.x - b.point.x || a.point.y - b.point.y)
       const a = anchors[0]!.point
       const b = anchors[anchors.length - 1]!.point
