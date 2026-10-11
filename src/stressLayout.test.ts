@@ -117,3 +117,34 @@ test('a graph with no backbone lays out from a random start, the same way twice'
   }
   expect(polylineLength(nodePositions.c!) / 300).toBeGreaterThan(0.9)
 })
+
+test('a component with no backbone beside an anchored one lays out too, below it', () => {
+  const request = seedBackbone(anchored())
+  request.graph.nodes.push({ id: 'p', length: 100 }, { id: 'q', length: 100 })
+  request.graph.edges.push({ from: 'p', to: 'q' }, { from: 'q', to: 'p' })
+  const { nodePositions } = stressLayout(request)
+  for (const id of ['v1', 'v2', 'v3']) {
+    for (const p of nodePositions[id]!) {
+      expect(p.y).toBe(0)
+    }
+  }
+  const backboneBottom = Math.max(
+    ...['v1', 'v2', 'v3', 'ins'].flatMap(id =>
+      nodePositions[id]!.map(p => p.y),
+    ),
+  )
+  for (const id of ['p', 'q']) {
+    for (const p of nodePositions[id]!) {
+      expect(Number.isFinite(p.x) && Number.isFinite(p.y)).toBe(true)
+      expect(p.y).toBeGreaterThan(backboneBottom)
+    }
+  }
+  expect(polylineLength(nodePositions.p!) / 100).toBeGreaterThan(0.9)
+})
+
+test('a straight backbone node keeps its exact length through smoothing', () => {
+  const { nodePositions } = stressLayout(seedBackbone(anchored()))
+  for (const id of ['v1', 'v2', 'v3']) {
+    expect(polylineLength(nodePositions[id]!)).toBeCloseTo(100, 6)
+  }
+})

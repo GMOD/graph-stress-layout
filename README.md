@@ -1,22 +1,23 @@
 # @jbrowse/graph-stress-layout
 
-Stress layout of a sequence graph by stochastic gradient descent (Zheng, Pawar &
-Goodman 2019), in plain JS with no dependencies.
+Layout of a sequence graph in plain JS with no dependencies: a reference
+backbone drawn straight with every variant placed against it, and stress layout
+by stochastic gradient descent (Zheng, Pawar & Goodman 2019) for the rest.
 
 Key characteristics
-
-- Target distances come from random walks along the graph, after odgi's
-  path-guided SGD, so a repeat's loop draws as a ring of its own circumference.
 
 - Each node is a chain of points at its drawn length, and the result is a
   polyline per node.
 
-- A node of rank 0 is the reference backbone. Seeded along x, the backbone is
-  held straight and in reference order, and the rest of the graph is drawn
-  against it by a structural placement (`stressPlacement`): an allele as a lens
-  under its gap, a longer one as a teardrop, a deletion as an arch, and nested
-  pieces on the outside of their parent's curve. A component with a backbone
-  keeps that drawing; the stress schedule lays out the components without one.
+- A node of rank 0 is the reference backbone. Seeded along x, it is drawn
+  straight and in reference order, and `stressPlacement` hangs the rest of its
+  component off it: an allele as a lens under its gap, a longer one as a
+  teardrop, a deletion as an arch, nested pieces on the outside of their
+  parent's curve.
+
+- A component with no backbone takes the stress layout, with target distances
+  from random walks along the graph after odgi's path-guided SGD, so a repeat's
+  loop draws as a ring of its own circumference.
 
 ## Example
 

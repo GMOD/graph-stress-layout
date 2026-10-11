@@ -7,24 +7,21 @@ import type {
   StressRequest,
 } from './types.ts'
 
-// A stress layout by stochastic gradient descent (Zheng, Pawar & Goodman
-// 2019) in plain JS, taking the Bandage engine's request: each node is the
-// chain of points FMMM would build, and the result is a polyline per node.
+// A layout taking the Bandage engine's request: each node is the chain of
+// points FMMM would build, and the result is a polyline per node.
 //
-// Target distances come from random walks, after odgi's path-guided SGD:
+// A component with a seeded backbone is drawn by stressPlacement: the
+// backbone straight along x, every other node hung off it. The rest is a
+// stress layout by stochastic gradient descent (Zheng, Pawar & Goodman 2019)
+// with target distances from random walks, after odgi's path-guided SGD:
 // every point starts a few walks of log-uniform length each iteration, and
 // how far a walk got is how far apart its ends should sit, so a repeat's loop
-// draws as a ring of its own circumference. Reference points also target
-// their signed reference separation along x, which holds the backbone
-// straight and in order without pinning it. Stress has no repulsion, so a
+// draws as a ring of its own circumference. Stress has no repulsion, so a
 // final pass pushes apart points that are close but not joined.
 //
-// A component with a backbone is drawn by stressPlacement and skips the
-// schedule. Walks from a loop's leg run on along the backbone, so the
-// schedule pulls each leg to lie along the reference on its own side and the
-// legs cross at the neck; on HPRC MHC class II it turned 80 clean alleles
-// into twisted lollipops, and starting it late in the schedule, stopping
-// walks at the backbone, or the untangle pass alone each left the crossings.
+// Running the schedule on a placed component twists its loops, since a walk
+// from a loop's leg runs on along the backbone and pulls the leg to lie along
+// it: 32 node crossings on HPRC MHC class II against the placement's 4.
 
 // walks per point and iterations by the quality the request names
 const QUALITY = [
@@ -39,15 +36,11 @@ const UNTANGLE_PASSES = 20
 const UNTANGLE_LINKS = 3
 const UNTANGLE_PUSH = 0.3
 const SMOOTH_PASSES = 2
+// a 20-link cap balls a 3k-node graph up
 const MAX_HOPS = 200
-// A walk on a component with a reference stops at this many links: the
-// reference term holds its long range, so the long walks only cost time. On
-// cuts of 1.3k-4k nodes this is 2.4-4x faster with the same drawing; without
-// a reference, a 20-link cap balls a 3k-node graph up.
-const REFERENCE_HOPS = 20
 // the step size the schedule ends on, as a share of the smallest pair's
 const EPS = 0.1
-// the share of the schedule an anchored graph skips
+// the share of the schedule a seeded component skips
 const WARM = 0.5
 
 export type Side = 0 | 1
@@ -241,7 +234,7 @@ export function stressLayout(
   opts: StressOptions = {},
 ): LayoutResult {
   const c = chains(request)
-  const { n, off, nb, wt, seedX, seedY, backbone, first, count, per, link } = c
+  const { n, off, nb, wt, seedX, seedY, first, count, per, link } = c
   const o = request.options
   const quality =
     QUALITY[Math.max(0, Math.min(4, num(opts.quality ?? o.quality, 2)))]!
@@ -284,34 +277,20 @@ export function stressLayout(
     }
   }
   // the points the schedule moves: those of components the placement did not
-  // draw whole
+  // draw whole, in index order so the schedule runs as it would alone
+  const drawn = members.map(
+    points =>
+      placed !== undefined && points.every(i => !Number.isNaN(placed.X[i])),
+  )
   const loose: number[] = []
   let looseSeeded = true
-  for (const points of members) {
-    if (placed && points.every(i => !Number.isNaN(placed.X[i]))) {
-      continue
-    }
-    for (const i of points) {
+  for (let i = 0; i < n; i++) {
+    if (!drawn[comp[i]!]) {
       loose.push(i)
       looseSeeded &&= !Number.isNaN(seedX[i])
     }
   }
-  // each component's reference points by seed x, for the reference term
-  const refIdx = members.map(points =>
-    Int32Array.from(
-      points
-        .filter(i => backbone[i] && !Number.isNaN(seedX[i]))
-        .sort((a, b) => seedX[a]! - seedX[b]!),
-    ),
-  )
-  const refX = refIdx.map(idx => Float64Array.from(idx, i => seedX[i]!))
-  let span = 0
-  for (const xs of refX) {
-    if (xs.length) {
-      span = Math.max(span, xs[xs.length - 1]! - xs[0]!)
-    }
-  }
-  const dmax = Math.max(span, total / 4, dmin * 10)
+  const dmax = Math.max(total / 4, dmin * 10)
   const etaMax = dmax * dmax
   const etaMin = EPS * dmin * dmin
   const { walks, iterations } = quality
@@ -343,8 +322,7 @@ export function stressLayout(
     let idx = c.indexOf[i]!
     let dir = rand() < 0.5 ? -1 : 1
     let remaining = length
-    const maxHops = refIdx[comp[i]!]!.length >= 2 ? REFERENCE_HOPS : MAX_HOPS
-    for (let hops = 0; hops < maxHops; hops++) {
+    for (let hops = 0; hops < MAX_HOPS; hops++) {
       const points = count[chain]!
       const step = per[chain]!
       const toEnd = (dir > 0 ? points - 1 - idx : idx) * step
@@ -371,40 +349,6 @@ export function stressLayout(
     }
     return -1
   }
-  // A reference partner at a log-uniform reference distance either way, and
-  // the term pulling the pair to its signed separation along x.
-  const referenceTerm = (i: number, eta: number) => {
-    const idx = refIdx[comp[i]!]!
-    if (!backbone[i] || idx.length < 2 || Number.isNaN(seedX[i])) {
-      return
-    }
-    const xs = refX[comp[i]!]!
-    const target =
-      seedX[i]! +
-      Math.exp(logMin + rand() * (logMax - logMin)) * (rand() < 0.5 ? -1 : 1)
-    let lo = 0
-    let hi = xs.length
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1
-      if (xs[mid]! < target) {
-        lo = mid + 1
-      } else {
-        hi = mid
-      }
-    }
-    const j = idx[Math.min(lo, idx.length - 1)]!
-    const d = seedX[j]! - seedX[i]!
-    if (j === i || d === 0) {
-      return
-    }
-    let mu = eta / (d * d)
-    if (mu > 1) {
-      mu = 1
-    }
-    const r = (mu * (X[j]! - X[i]! - d)) / 2
-    X[i] = X[i]! + r
-    X[j] = X[j]! - r
-  }
   const adjacentTerms = (i: number, eta: number) => {
     for (let e = off[i]!; e < off[i + 1]!; e++) {
       const j = nb[e]!
@@ -415,8 +359,8 @@ export function stressLayout(
   }
 
   const order = Int32Array.from(loose)
-  const warm = loose.length && looseSeeded ? Math.floor(WARM * iterations) : 0
-  for (let t = warm; t < iterations; t++) {
+  const warm = looseSeeded ? Math.floor(WARM * iterations) : 0
+  for (let t = loose.length ? warm : iterations; t < iterations; t++) {
     const eta = etaMax * Math.exp(-lambda * t)
     for (let k = order.length - 1; k > 0; k--) {
       const r = Math.floor(rand() * (k + 1))
@@ -433,13 +377,11 @@ export function stressLayout(
           move(i, j, walked, eta)
         }
       }
-      referenceTerm(i, eta)
     }
   }
 
   // untangle: points closer than the radius and not joined push apart, then
-  // a sweep over the links and the reference terms pulls each back towards
-  // its length
+  // a sweep over the links pulls each back towards its length
   const radius = UNTANGLE_LINKS * link
   const key = (x: number, y: number) =>
     (Math.floor(x / radius) * 73856093) ^ (Math.floor(y / radius) * 19349663)
@@ -503,7 +445,6 @@ export function stressLayout(
     }
     for (const i of loose) {
       adjacentTerms(i, Infinity)
-      referenceTerm(i, etaMin * 4)
     }
   }
 
@@ -541,9 +482,8 @@ export function stressLayout(
 // Points a to a+m-1 moved to equal spacing along their polyline. Smoothing
 // shortens a curve, so the interior first bulges out from the chord between
 // the ends until the length is back, and the points then take their full
-// spacing. The ends stay: extending them along their tangents instead ran a
-// node's ends past its anchors and through the links there, 13 of MHC class
-// II's 32 node crossings.
+// spacing. The ends stay, since extending them along their tangents ran a
+// node past its anchors and through the links there.
 function respace(
   X: Float64Array,
   Y: Float64Array,
@@ -551,20 +491,15 @@ function respace(
   m: number,
   per: number,
 ) {
-  const arc = (out: Float64Array) => {
-    for (let i = 1; i < m; i++) {
-      out[i] =
-        out[i - 1]! +
-        Math.hypot(X[a + i]! - X[a + i - 1]!, Y[a + i]! - Y[a + i - 1]!)
-    }
-    return out
+  bulge(X, Y, a, m, per * (m - 1))
+  const lengths = new Float64Array(m)
+  for (let i = 1; i < m; i++) {
+    lengths[i] =
+      lengths[i - 1]! +
+      Math.hypot(X[a + i]! - X[a + i - 1]!, Y[a + i]! - Y[a + i - 1]!)
   }
-  const lengths = arc(new Float64Array(m))
   if (!lengths[m - 1]) {
     return
-  }
-  if (bulge(X, Y, a, m, per * (m - 1))) {
-    arc(lengths)
   }
   const total = lengths[m - 1]!
   const xs = X.slice(a, a + m)
@@ -585,7 +520,7 @@ function respace(
 // Interior points a+1 to a+m-2 pushed out from the chord between the ends,
 // their offsets from it scaled by one factor, until the polyline is `target`
 // long. A chain lying along its chord has nothing to push and keeps its
-// length. True when it moved anything.
+// length.
 function bulge(
   X: Float64Array,
   Y: Float64Array,
@@ -612,12 +547,15 @@ function bulge(
   const lengthAt = (f: number) => {
     let total = 0
     for (let i = 1; i < m; i++) {
-      total += Math.hypot(along[i]! - along[i - 1]!, f * (off[i]! - off[i - 1]!))
+      total += Math.hypot(
+        along[i]! - along[i - 1]!,
+        f * (off[i]! - off[i - 1]!),
+      )
     }
     return total
   }
   if (flat || lengthAt(1) >= target) {
-    return false
+    return
   }
   let lo = 1
   let hi = 2
@@ -638,7 +576,6 @@ function bulge(
     X[a + i] = cx + along[i]! * ux - f * off[i]! * uy
     Y[a + i] = cy + along[i]! * uy + f * off[i]! * ux
   }
-  return true
 }
 
 // Components stacked top to bottom, left aligned, `gap` apart. A component

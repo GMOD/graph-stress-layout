@@ -1,7 +1,7 @@
 {
   "name": "@jbrowse/graph-stress-layout",
   "version": "0.1.1",
-  "description": "Stress layout of a sequence graph by walk-guided SGD in plain JS: nodes as chains of points, a reference backbone held straight, a polyline per node out",
+  "description": "Sequence graph layout in plain JS: a reference backbone drawn straight with every variant placed against it, walk-guided stress SGD for components without one, a polyline per node out",
   "license": "MIT",
   "author": {
     "name": "Colin Diesh",
