@@ -1,6 +1,6 @@
 {
   "name": "@jbrowse/graph-stress-layout",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Sequence graph layout in plain JS: a reference backbone drawn straight with every variant placed against it, walk-guided stress SGD for components without one, a polyline per node out",
   "license": "MIT",
   "author": {
