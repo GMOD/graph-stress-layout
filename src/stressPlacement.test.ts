@@ -94,3 +94,69 @@ test('a component with no backbone stays unplaced', () => {
   expect(Number.isNaN(X[X.length - 1]!)).toBe(true)
   expect(Number.isNaN(X[0]!)).toBe(false)
 })
+
+const segmentsCross = (
+  p: { x: number; y: number }[],
+  q: { x: number; y: number }[],
+) => {
+  const side = (
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    c: { x: number; y: number },
+  ) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+  for (let i = 1; i < p.length; i++) {
+    for (let j = 1; j < q.length; j++) {
+      const [a, b, c, d] = [p[i - 1]!, p[i]!, q[j - 1]!, q[j]!]
+      if (
+        side(a, b, c) * side(a, b, d) < 0 &&
+        side(c, d, a) * side(c, d, b) < 0
+      ) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+test('loops off either side of a short backbone node hang without crossing', () => {
+  const request: StressRequest = {
+    graph: {
+      nodes: [
+        backbone('v1', 0),
+        { ...backbone('v2', 105), length: 5 },
+        backbone('v3', 115),
+        { id: 'a', length: 150 },
+        { id: 'b', length: 45 },
+      ],
+      edges: [
+        { from: 'v1', to: 'v2' },
+        { from: 'v2', to: 'v3' },
+        { from: 'v1', to: 'a' },
+        { from: 'a', to: 'v2' },
+        { from: 'v2', to: 'b' },
+        { from: 'b', to: 'v3' },
+      ],
+    },
+    options,
+  }
+  const { points } = placed(request)
+  expect(segmentsCross(points('a'), points('b'))).toBe(false)
+})
+
+test('a short allele over a wide gap hangs deeper than one over a narrow gap', () => {
+  const narrow = Math.max(
+    ...placed(withAllele('a', 60))
+      .points('a')
+      .map(p => p.y),
+  )
+  const request = withAllele('a', 60)
+  request.graph.nodes[1] = backbone('v2', 505)
+  request.graph.nodes[2] = backbone('v3', 1010)
+  request.graph.nodes[1].length = 500
+  const wide = Math.max(
+    ...placed(request)
+      .points('a')
+      .map(p => p.y),
+  )
+  expect(wide).toBeGreaterThan(narrow + 50)
+})

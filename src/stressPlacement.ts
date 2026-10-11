@@ -12,7 +12,8 @@ export const ROUTE_ID = '\u0000deletion:'
 // spine along a circular arc of the piece's drawn length, a lens when it fits
 // its gap and a teardrop when longer, pushed out (legs, then a dropped chord,
 // then a tilt) until it clears what is drawn; a spine shorter than its gap is
-// a straight bar under it; one anchor gives a straight tip. Anchors on
+// a straight bar under it, hung deeper the wider the gap so its links leave
+// the lane; one anchor gives a straight tip. Anchors on
 // different curves use the chord between them. What a spine leaves unplaced
 // becomes pieces anchored on it, so nesting recurses. Deletion routes arch
 // above the backbone. Components with no backbone stay NaN for the engine's
@@ -466,8 +467,10 @@ class Placer {
     }
   }
 
-  // placed points within CLEAR of the candidate, off the exempt curve and away
-  // from the anchors, up to `limit`
+  // placed points within CLEAR of the candidate, off the exempt curve and
+  // beyond a lane of the anchors, up to `limit`. Exempting two lanes let
+  // teardrops off adjacent anchors cross at the neck: 3 node crossings on the
+  // HPRC KIV-2 cut against 1, and 2 on MHC class II against 0.
   private violations(
     pts: Point[],
     exempt: Curve | undefined,
@@ -476,9 +479,7 @@ class Placer {
   ) {
     let n = 0
     for (const p of pts) {
-      if (
-        anchorPts.some(a => Math.hypot(p.x - a.x, p.y - a.y) < 2 * LANE_GAP)
-      ) {
+      if (anchorPts.some(a => Math.hypot(p.x - a.x, p.y - a.y) < LANE_GAP)) {
         continue
       }
       const cx = Math.floor(p.x / CLEAR)
@@ -813,8 +814,12 @@ class Placer {
         mapped = pick(this.arcCandidates(frame, tA, sign, c, L))
       } else {
         const bar = L - 2 * link
+        const d0 = Math.max(
+          MIN_DEPTH,
+          Math.min(ROUTE_BOW * (c - bar), ROUTE_CAP),
+        )
         mapped = pick(
-          depths(MIN_DEPTH, 12).map(
+          depths(d0, 12).map(
             d => () =>
               fitted(
                 frame,
