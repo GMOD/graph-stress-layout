@@ -27,7 +27,7 @@ const TIP_ANGLE = (25 * Math.PI) / 180
 const BOW = 0.25
 const BOW_CAP = 150
 // a teardrop beside another leans away from it rather than dropping
-const TEARDROP_TILTS = [0, -0.35, 0.35, -0.7, 0.7]
+const TEARDROP_TILTS = [0, -0.35, 0.35, -0.7, 0.7, -1.05, 1.05, -1.4, 1.4]
 const SIDES: Side[] = [0, 1]
 
 interface Point {
@@ -468,9 +468,14 @@ class Placer {
         free.push(k)
       }
     }
-    // narrow pieces first, short before long, except that pieces on the same
+    // Narrow pieces first, short before long, except that pieces on the same
     // feet go longest first so an inner loop nests inside the outer one rather
-    // than crossing it
+    // than crossing it. A wide loop whose foot lies inside a narrower loop's
+    // disc still drives its leg through it; making the narrow loop yield and
+    // re-place after the wide one freed it but re-placed it as a hairpin on
+    // long legs, 243/411/13 to 229/459/21 link-node/link-link/node-node
+    // crossings on the KIV-2 eight-haplotype cut at twice the time, and
+    // leaning the re-placed loop by shear at 0.1-0.4 rad gave 310/480/25.
     const pieces = this.componentsOf(free)
       .map(members => ({ members, anchors: this.anchorsOf(members) }))
       .filter(p => p.anchors.length)
