@@ -52,6 +52,8 @@ const { nodePositions } = stressLayout(
 
 - [@jbrowse/bandage-core](https://github.com/GMOD/bandage-core) - Bandage layout
   and drawing engine
+- [@jbrowse/graph-fmmm-layout](https://github.com/GMOD/graph-fmmm-layout) -
+  Bandage's force-directed FMMM layout as wasm
 - [BandageJS](https://github.com/cmdcolin/BandageJS) - standalone page for GFA
   and gbz-base graphs
 - [ggbandage](https://github.com/GMOD/ggbandage) - Bandage-style graph figures
