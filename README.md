@@ -1,25 +1,12 @@
 # @jbrowse/graph-stress-layout
 
-Layout of a sequence graph in plain JS with no dependencies: a reference
-backbone drawn straight with every variant placed against it, and stress layout
-by stochastic gradient descent (Zheng, Pawar & Goodman 2019) for the rest.
+Lays out a sequence graph in plain JS with no dependencies.
 
-Key characteristics
+## Usage
 
-- Each node is a chain of points at its drawn length, and the result is a
-  polyline per node.
-
-- A node of rank 0 is the reference backbone. Seeded along x, it is drawn
-  straight and in reference order, and `stressPlacement` hangs the rest of its
-  component off it: an allele as a lens under its gap, a longer one as a
-  teardrop, a deletion as an arch, nested pieces on the outside of their
-  parent's curve.
-
-- A component with no backbone takes the stress layout, with target distances
-  from random walks along the graph after odgi's path-guided SGD, so a repeat's
-  loop draws as a ring of its own circumference.
-
-## Example
+```bash
+npm install @jbrowse/graph-stress-layout
+```
 
 ```ts
 import { seedBackbone, stressLayout } from '@jbrowse/graph-stress-layout'
@@ -48,14 +35,29 @@ const { nodePositions } = stressLayout(
 )
 ```
 
+- Each node has a `length` in bp, and `stressLayout` returns `nodePositions`, a
+  polyline of `{ x, y }` points per node id at the node's drawn length
+- A node with `stable: { rank: 0, start }` is on the reference backbone.
+  `seedBackbone` places the backbone end to end along x in order of `start`
+- In a component with a seeded backbone, `stressPlacement` draws the backbone
+  straight and places every other node against it: an allele as a lens under its
+  gap, a longer one as a teardrop, a node whose id starts with `ROUTE_ID` as a
+  deletion's arch, and nested pieces on the outside of their parent's curve
+- A component with no backbone gets a stress layout by stochastic gradient
+  descent (Zheng, Pawar & Goodman 2019). As in odgi's path-guided SGD, random
+  walks along the graph set the target distances, so the layout draws a repeat's
+  loop as a ring whose circumference is the loop's drawn length
+- `stressLayout` reads `quality` (0 to 4, default 2), `seed` (default 1) and
+  `componentSeparation` (default 15) from its second argument or from `options`
+
 ## See also
 
 - [@jbrowse/bandage-core](https://github.com/GMOD/bandage-core) - Bandage layout
   and drawing engine
 - [@jbrowse/graph-fmmm-layout](https://github.com/GMOD/graph-fmmm-layout) -
   Bandage's force-directed FMMM layout as wasm
-- [BandageJS](https://github.com/cmdcolin/BandageJS) - standalone page for GFA
-  and gbz-base graphs
+- [BandageJS](https://github.com/cmdcolin/BandageJS) - browser viewer for GFA
+  files, gfa-to-tabix walk files and gbz-base databases
 - [ggbandage](https://github.com/GMOD/ggbandage) - Bandage-style graph figures
   as ggplot2 layers
 - [jbrowse-plugin-graphgenomeviewer](https://github.com/GMOD/jbrowse-plugin-graphgenomeviewer) -
