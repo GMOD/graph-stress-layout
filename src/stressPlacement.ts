@@ -220,6 +220,8 @@ function lineFlat(
   }
 }
 
+const sideKey = (k: number, s: Side) => k * 2 + s
+
 // A placed curve: dense samples with cumulative arc length and outward normals.
 class Curve {
   readonly arc: Float64Array
@@ -414,7 +416,7 @@ class Placer {
     let max = -Infinity
     for (let k = 0; k < N; k++) {
       const start = first[k]!
-      if (!backbone[start] || Number.isNaN(seedX[start])) {
+      if (backbone[start] === 0 || Number.isNaN(seedX[start])) {
         continue
       }
       min = Math.min(min, seedX[start]!)
@@ -434,7 +436,7 @@ class Placer {
     this.backboneCentroid = { x: (min + max) / 2, y: 0 }
     for (let k = 0; k < N; k++) {
       const start = first[k]!
-      if (!backbone[start] || Number.isNaN(seedX[start])) {
+      if (backbone[start] === 0 || Number.isNaN(seedX[start])) {
         continue
       }
       const pts: Point[] = []
@@ -454,7 +456,7 @@ class Placer {
   static hasBackbone(c: Chains) {
     for (let k = 0; k < c.ids.length; k++) {
       const start = c.first[k]!
-      if (c.backbone[start] && !Number.isNaN(c.seedX[start])) {
+      if (c.backbone[start]! !== 0 && !Number.isNaN(c.seedX[start])) {
         return true
       }
     }
@@ -655,9 +657,8 @@ class Placer {
     toExitSide?: Side,
   ): SpineStep[] | undefined {
     const set = new Set(members)
-    const key = (k: number, s: Side) => k * 2 + s
     const reached = (k: number, s: Side) => k === to && other(s) === toExitSide
-    const prev = new Map<number, number>([[key(from, fromSide), -1]])
+    const prev = new Map<number, number>([[sideKey(from, fromSide), -1]])
     const queue: [number, Side][] = [[from, fromSide]]
     let far: [number, Side] = [from, fromSide]
     for (const [k, s] of queue) {
@@ -666,10 +667,10 @@ class Placer {
         break
       }
       for (const [v, t] of this.links[k]![other(s)]!) {
-        if (!set.has(v) || prev.has(key(v, t))) {
+        if (!set.has(v) || prev.has(sideKey(v, t))) {
           continue
         }
-        prev.set(key(v, t), key(k, s))
+        prev.set(sideKey(v, t), sideKey(k, s))
         queue.push([v, t])
       }
     }
@@ -677,8 +678,8 @@ class Placer {
       return undefined
     }
     const path: SpineStep[] = []
-    for (let cur = key(far[0], far[1]); cur !== -1; cur = prev.get(cur)!) {
-      path.push({ k: cur >> 1, enter: (cur & 1) as Side })
+    for (let cur = sideKey(far[0], far[1]); cur !== -1; cur = prev.get(cur)!) {
+      path.push({ k: cur >> 1, enter: cur % 2 === 1 ? 1 : 0 })
     }
     return path.reverse()
   }
@@ -797,7 +798,7 @@ class Placer {
     if (anchors.length === 0) {
       return
     }
-    const route = members.every(k => this.route[k])
+    const route = members.every(k => this.route[k] === true)
     const shared = anchors.every(a => a.curve === anchors[0]!.curve)
       ? anchors[0]!.curve
       : undefined

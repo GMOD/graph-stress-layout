@@ -285,7 +285,7 @@ export function stressLayout(
   const loose: number[] = []
   let looseSeeded = true
   for (let i = 0; i < n; i++) {
-    if (!drawn[comp[i]!]) {
+    if (!drawn[comp[i]!]!) {
       loose.push(i)
       looseSeeded &&= !Number.isNaN(seedX[i])
     }
@@ -498,7 +498,7 @@ function respace(
       lengths[i - 1]! +
       Math.hypot(X[a + i]! - X[a + i - 1]!, Y[a + i]! - Y[a + i - 1]!)
   }
-  if (!lengths[m - 1]) {
+  if (!(lengths[m - 1]! > 0)) {
     return
   }
   const total = lengths[m - 1]!

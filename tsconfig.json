@@ -14,8 +14,8 @@
     "noUncheckedIndexedAccess": true,
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "types": ["vitest/globals"]
   },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts"]
+  "include": ["src"]
 }
