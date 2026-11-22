@@ -1,3 +1,4 @@
+import { seedBackbone } from './seedBackbone.ts'
 import { chains } from './stressEngine.ts'
 import { ROUTE_ID, stressPlacement } from './stressPlacement.ts'
 
@@ -176,4 +177,185 @@ test('a second loop over the same gap nests inside the first, feet at the anchor
       expect(p.y).toBeGreaterThanOrEqual(-1e-6)
     }
   }
+})
+
+type Allele = [id: string, length: number, from: string, to: string]
+
+// a reference of [id, length] nodes in a row, each allele linked from the end
+// of one reference node to the start of another
+function bubbles(
+  reference: [string, number][],
+  alleles: Allele[],
+  nodeLengthPerMegabase = 1_000_000,
+): StressRequest {
+  let start = 0
+  const nodes: StressNode[] = reference.map(([id, length]) => {
+    const node = { id, length, stable: { rank: 0, start } }
+    start += length
+    return node
+  })
+  return seedBackbone({
+    graph: {
+      nodes: [
+        ...nodes,
+        ...alleles.map(([id, length], i) => ({
+          id,
+          length,
+          stable: { rank: i + 1 },
+        })),
+      ],
+      edges: [
+        ...reference
+          .slice(1)
+          .map(([id], i) => ({ from: reference[i]![0], to: id })),
+        ...alleles.flatMap(([id, , from, to]) => [
+          { from, to: id },
+          { from: id, to },
+        ]),
+      ],
+    },
+    options: { ...options, nodeLengthPerMegabase },
+  })
+}
+
+const distanceToSegment = (
+  p: { x: number; y: number },
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+) => {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const f = Math.max(
+    0,
+    Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy)),
+  )
+  return Math.hypot(p.x - a.x - f * dx, p.y - a.y - f * dy)
+}
+
+// every allele's two links pass more than `clear` from every other allele's
+// nodes and cross neither those nodes nor their links
+function expectLinksClear(request: StressRequest, alleles: Allele[]) {
+  const { points } = placed(request)
+  const drawn = alleles.map(([id, , from, to]) => {
+    const pts = points(id)
+    const a = points(from).at(-1)!
+    const b = points(to)[0]!
+    return {
+      id,
+      pts,
+      links: [
+        [a, pts[0]!],
+        [pts.at(-1)!, b],
+      ],
+      path: [a, ...pts, b],
+    }
+  })
+  for (const s of drawn) {
+    for (const t of drawn.filter(other => other !== s)) {
+      for (const [a, b] of s.links) {
+        expect(segmentsCross([a!, b!], t.path)).toBe(false)
+        for (const p of t.pts) {
+          expect(distanceToSegment(p, a!, b!)).toBeGreaterThan(10)
+        }
+      }
+    }
+  }
+  return points
+}
+
+const lowest = (pts: { y: number }[]) =>
+  pts.reduce((m, p) => Math.min(m, p.y), Infinity)
+const highest = (pts: { y: number }[]) =>
+  pts.reduce((m, p) => Math.max(m, p.y), -Infinity)
+
+// chr3:162.77-162.92 Mb in HPRC v2.1's GRCh38 rGFA, at the scale the graph
+// track drew it: 15 bp of HG02523 replace 114 kb of GRCh38, and 2.3 kb of
+// HG01981 replace the 21.9 kb in the middle of that
+const nestedDeletions: Allele[] = [
+  ['outer', 15, 'left', 'right'],
+  ['inner', 2279, 'outer.start', 'outer.end'],
+]
+
+test('a deletion nested in a longer one hangs as its own detour, clear of the outer links', () => {
+  const points = expectLinksClear(
+    bubbles(
+      [
+        ['left', 28_766],
+        ['outer.start', 13_608],
+        ['inner.gap', 21_916],
+        ['outer.end', 78_692],
+        ['right', 11_259],
+      ],
+      nestedDeletions,
+      710,
+    ),
+    nestedDeletions,
+  )
+  expect(lowest(points('outer'))).toBeGreaterThan(highest(points('inner')) + 10)
+})
+
+test('a deletion sharing its left anchor with a shorter one inside it hangs clear of that one', () => {
+  expectLinksClear(
+    bubbles(
+      [
+        ['left', 50],
+        ['m1', 60],
+        ['m2', 140],
+        ['right', 50],
+      ],
+      [
+        ['outer', 5, 'left', 'right'],
+        ['inner', 5, 'left', 'm2'],
+      ],
+    ),
+    [
+      ['outer', 5, 'left', 'right'],
+      ['inner', 5, 'left', 'm2'],
+    ],
+  )
+})
+
+test('three deletions nested off centre hang with no link through another allele', () => {
+  const alleles: Allele[] = [
+    ['outermost', 5, 'left', 'right'],
+    ['mid', 5, 'a', 'd'],
+    ['inner', 5, 'b', 'c'],
+  ]
+  expectLinksClear(
+    bubbles(
+      [
+        ['left', 50],
+        ['a', 10],
+        ['b', 10],
+        ['g', 15],
+        ['c', 56],
+        ['d', 500],
+        ['right', 50],
+      ],
+      alleles,
+    ),
+    alleles,
+  )
+})
+
+test('equal alleles over one gap hang stacked under its centre', () => {
+  const { points } = placed(
+    bubbles(
+      [
+        ['v1', 100],
+        ['v2', 590],
+        ['v3', 100],
+      ],
+      [
+        ['p', 5, 'v1', 'v3'],
+        ['q', 5, 'v1', 'v3'],
+      ],
+    ),
+  )
+  const p = points('p')
+  const q = points('q')
+  for (const allele of [p, q]) {
+    expect((allele[0]!.x + allele.at(-1)!.x) / 2).toBeCloseTo(400)
+  }
+  expect(Math.abs(lowest(p) - lowest(q))).toBeGreaterThanOrEqual(15)
 })

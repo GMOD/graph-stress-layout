@@ -28,6 +28,7 @@ const BOW = 0.25
 const BOW_CAP = 150
 // a teardrop beside another leans away from it rather than dropping
 const TEARDROP_TILTS = [0, -0.35, 0.35, -0.7, 0.7, -1.05, 1.05, -1.4, 1.4]
+const BAR_SLIDES = [0, -1 / 3, 1 / 3, -2 / 3, 2 / 3]
 const SIDES: Side[] = [0, 1]
 
 interface Point {
@@ -47,9 +48,13 @@ interface Flat {
   length: number
 }
 
+type Chord = [Point, Point]
+
 interface Mapped {
   pts: Point[]
   refs: Point[]
+  links?: Chord[]
+  slid?: boolean
 }
 
 interface Anchor {
@@ -84,6 +89,19 @@ function unit(a: Point, b: Point): Point {
 
 function lerp(a: Point, b: Point, f: number): Point {
   return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f }
+}
+
+function turn(p: Point, q: Point, r: Point) {
+  return (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
+}
+
+function crosses([a, b]: Chord, [c, d]: Chord) {
+  return turn(a, b, c) * turn(a, b, d) < 0 && turn(c, d, a) * turn(c, d, b) < 0
+}
+
+function sampled([a, b]: Chord, step: number) {
+  const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / step))
+  return Array.from({ length: n + 1 }, (_, i) => lerp(a, b, i / n))
 }
 
 function centroidOf(pts: Point[]): Point {
@@ -399,6 +417,7 @@ class Placer {
   private readonly links: [number, Side][][][]
   private readonly route: boolean[]
   private readonly grid = new Map<number, Occupant[]>()
+  private readonly chords: Chord[] = []
   readonly backbone: Curve
   private readonly backboneCentroid: Point
 
@@ -576,24 +595,45 @@ class Placer {
     exempt: Curve | undefined,
     anchorPts: Point[],
   ) {
+    let chosen: Candidate | undefined
+    let nodesClear: Candidate | undefined
     let best: Candidate | undefined
     let bestV = Infinity
-    for (const candidate of candidates) {
-      const v = this.violations(
-        candidate(COARSE_STEP).pts,
-        exempt,
-        anchorPts,
-        bestV,
-      )
-      if (v === 0) {
-        return candidate(FINE_STEP)
-      }
-      if (v < bestV) {
-        bestV = v
-        best = candidate
+    let centreClear = false
+    for (let i = 0; i < candidates.length && !chosen; i++) {
+      const candidate = candidates[i]!
+      const mapped = candidate(COARSE_STEP)
+      const slid = mapped.slid === true
+      if (!slid || centreClear) {
+        const v = this.violations(mapped.pts, exempt, anchorPts, bestV)
+        if (v === 0) {
+          if (this.linksClear(mapped.links ?? [], exempt, anchorPts)) {
+            chosen = candidate
+          } else if (!slid) {
+            nodesClear ??= candidate
+          }
+        } else if (!slid && v < bestV) {
+          bestV = v
+          best = candidate
+        }
+        if (!slid) {
+          centreClear = v === 0
+        }
       }
     }
-    return best!(FINE_STEP)
+    return (chosen ?? nodesClear ?? best!)(FINE_STEP)
+  }
+
+  private linksClear(
+    links: Chord[],
+    exempt: Curve | undefined,
+    anchorPts: Point[],
+  ) {
+    return links.every(
+      link =>
+        !this.chords.some(placed => crosses(link, placed)) &&
+        this.violations(sampled(link, COARSE_STEP), exempt, anchorPts, 1) === 0,
+    )
   }
 
   private anchorsOf(members: number[]): Anchor[] {
@@ -895,19 +935,40 @@ class Placer {
       } else {
         const bar = L - 2 * link
         const d0 = Math.max(MIN_DEPTH, Math.min(BOW * (c - bar), BOW_CAP))
+        const room = (c - bar) / 2
+        const hang = (d: number, slide: number) => (step: number) =>
+          fitted(
+            frame,
+            tA,
+            sign,
+            length =>
+              lineFlat(c / 2 + slide * room - length / 2, d, 1, 0, length),
+            bar,
+            step,
+          )
+        const linked =
+          (d: number, slide: number): Candidate =>
+          step => {
+            const hung = hang(d, slide)(step)
+            return {
+              ...hung,
+              slid: slide !== 0,
+              links: [
+                [A.point, hung.pts[0]!],
+                [hung.pts.at(-1)!, B.point],
+              ],
+            }
+          }
         mapped = pick(
-          depths(d0, 12).map(
-            d => (step: number) =>
-              fitted(
-                frame,
-                tA,
-                sign,
-                length => lineFlat(c / 2 - length / 2, d, 1, 0, length),
-                bar,
-                step,
-              ),
-          ),
+          shared
+            ? depths(d0, 12).flatMap(d =>
+                BAR_SLIDES.map(slide => linked(d, slide)),
+              )
+            : depths(d0, 12).map(d => hang(d, 0)),
         )
+        for (const chord of mapped.links ?? []) {
+          this.chords.push(chord)
+        }
         start = 0
       }
     }
