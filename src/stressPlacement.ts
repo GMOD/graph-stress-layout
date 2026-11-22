@@ -29,6 +29,8 @@ const BOW_CAP = 150
 // a teardrop beside another leans away from it rather than dropping
 const TEARDROP_TILTS = [0, -0.35, 0.35, -0.7, 0.7, -1.05, 1.05, -1.4, 1.4]
 const BAR_SLIDES = [0, -1 / 3, 1 / 3, -2 / 3, 2 / 3]
+const CHORD_CELL = 4 * LANE_GAP
+const LONG_CHORD_CELLS = 64
 const SIDES: Side[] = [0, 1]
 
 interface Point {
@@ -54,7 +56,6 @@ interface Mapped {
   pts: Point[]
   refs: Point[]
   links?: Chord[]
-  slid?: boolean
 }
 
 interface Anchor {
@@ -357,7 +358,7 @@ function mapFlat(
 
 // A candidate drawing, sampled coarsely for the clearance check and at full
 // density once chosen
-type Candidate = (step: number) => Mapped
+type Candidate = ((step: number) => Mapped) & { slid?: boolean }
 
 const FINE_STEP = 5
 const COARSE_STEP = CLEAR / 2
@@ -409,6 +410,19 @@ function cellKey(gx: number, gy: number) {
   return (gx * 73856093) ^ (gy * 19349663)
 }
 
+function chordCell(v: number) {
+  return Math.floor(v / CHORD_CELL)
+}
+
+function chordCells([a, b]: Chord) {
+  return {
+    x0: chordCell(Math.min(a.x, b.x)),
+    x1: chordCell(Math.max(a.x, b.x)),
+    y0: chordCell(Math.min(a.y, b.y)),
+    y1: chordCell(Math.max(a.y, b.y)),
+  }
+}
+
 class Placer {
   private readonly points: (Point[] | undefined)[]
   // each placed point's arc length along its curve
@@ -417,7 +431,8 @@ class Placer {
   private readonly links: [number, Side][][][]
   private readonly route: boolean[]
   private readonly grid = new Map<number, Occupant[]>()
-  private readonly chords: Chord[] = []
+  private readonly chordGrid = new Map<number, Chord[]>()
+  private readonly longChords: Chord[] = []
   readonly backbone: Curve
   private readonly backboneCentroid: Point
 
@@ -603,17 +618,17 @@ class Placer {
     let centreClear = false
     for (let i = 0; i < candidates.length && !chosen; i++) {
       const candidate = candidates[i]!
-      const mapped = candidate(COARSE_STEP)
-      const slid = mapped.slid === true
+      const slid = candidate.slid === true
       if (!slid || centreClear) {
+        const mapped = candidate(COARSE_STEP)
         const v = this.violations(mapped.pts, exempt, anchorPts, bestV)
         const links = mapped.links ?? []
         if (v === 0) {
           if (this.linksClear(links, exempt, anchorPts)) {
             chosen = candidate
           } else {
-            if (!links.some(link => this.crossesPlaced(link))) {
-              uncrossed ??= candidate
+            if (!uncrossed && !links.some(link => this.crossesPlaced(link))) {
+              uncrossed = candidate
             }
             if (!slid) {
               nodesClear ??= candidate
@@ -638,13 +653,42 @@ class Placer {
   ) {
     return links.every(
       link =>
-        !this.crossesPlaced(link) &&
-        this.violations(sampled(link, COARSE_STEP), exempt, anchorPts, 1) === 0,
+        this.violations(sampled(link, COARSE_STEP), exempt, anchorPts, 1) ===
+          0 && !this.crossesPlaced(link),
     )
   }
 
   private crossesPlaced(link: Chord) {
-    return this.chords.some(placed => crosses(link, placed))
+    const { x0, x1, y0, y1 } = chordCells(link)
+    let hit = this.longChords.some(placed => crosses(link, placed))
+    for (let gx = x0; gx <= x1 && !hit; gx++) {
+      for (let gy = y0; gy <= y1 && !hit; gy++) {
+        hit =
+          this.chordGrid
+            .get(cellKey(gx, gy))
+            ?.some(placed => crosses(link, placed)) ?? false
+      }
+    }
+    return hit
+  }
+
+  private placeChord(chord: Chord) {
+    const { x0, x1, y0, y1 } = chordCells(chord)
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) > LONG_CHORD_CELLS) {
+      this.longChords.push(chord)
+    } else {
+      for (let gx = x0; gx <= x1; gx++) {
+        for (let gy = y0; gy <= y1; gy++) {
+          const key = cellKey(gx, gy)
+          const list = this.chordGrid.get(key)
+          if (list) {
+            list.push(chord)
+          } else {
+            this.chordGrid.set(key, [chord])
+          }
+        }
+      }
+    }
   }
 
   private anchorsOf(members: number[]): Anchor[] {
@@ -957,19 +1001,20 @@ class Placer {
             bar,
             step,
           )
-        const linked =
-          (d: number, slide: number): Candidate =>
-          step => {
-            const hung = hang(d, slide)(step)
-            return {
-              ...hung,
-              slid: slide !== 0,
-              links: [
-                [A.point, hung.pts[0]!],
-                [hung.pts.at(-1)!, B.point],
-              ],
-            }
-          }
+        const linked = (d: number, slide: number): Candidate =>
+          Object.assign(
+            (step: number): Mapped => {
+              const hung = hang(d, slide)(step)
+              return {
+                ...hung,
+                links: [
+                  [A.point, hung.pts[0]!],
+                  [hung.pts.at(-1)!, B.point],
+                ],
+              }
+            },
+            { slid: slide !== 0 },
+          )
         mapped = pick(
           shared
             ? depths(d0, 12).flatMap(d =>
@@ -978,7 +1023,7 @@ class Placer {
             : depths(d0, 12).map(d => hang(d, 0)),
         )
         for (const chord of mapped.links ?? []) {
-          this.chords.push(chord)
+          this.placeChord(chord)
         }
         start = 0
       }

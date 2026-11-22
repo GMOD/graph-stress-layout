@@ -39,8 +39,9 @@ function withAllele(id: string, length: number): StressRequest {
 function placed(request: StressRequest) {
   const c = chains(request)
   const { X, Y } = stressPlacement(c)
+  const index = new Map(c.ids.map((id, k) => [id, k]))
   const points = (id: string) => {
-    const k = c.ids.indexOf(id)
+    const k = index.get(id)!
     return Array.from({ length: c.count[k]! }, (_, i) => ({
       x: X[c.first[k]! + i]!,
       y: Y[c.first[k]! + i]!,
@@ -390,4 +391,34 @@ test('a deletion over one that dropped to clear its own links hangs below it, it
     0,
   )
   expect(lowest(points('outer'))).toBeGreaterThan(highest(points('inner')))
+})
+
+// Testing each link against every bar's links placed before it took 11-19 s
+// here
+test('a bar tests its links only against the links that can reach them, not every bar placed', () => {
+  const n = 16_000
+  const reference: [string, number][] = []
+  const alleles: Allele[] = []
+  for (let i = 0; i <= n; i++) {
+    reference.push([`a${i}`, 10])
+    if (i < n) {
+      reference.push([`g${i}`, 5])
+      alleles.push([`x${i}`, 1, `a${i}`, `a${i + 1}`])
+    }
+  }
+  const { points } = placed(bubbles(reference, alleles))
+  let centred = 0
+  for (let i = 0; i < n; i++) {
+    const [p, q] = points(`x${i}`)
+    const left = points(`a${i}`).at(-1)!
+    const right = points(`a${i + 1}`)[0]!
+    if (
+      p!.y === 12 &&
+      q!.y === 12 &&
+      Math.abs(p!.x + q!.x - left.x - right.x) < 1e-6
+    ) {
+      centred++
+    }
+  }
+  expect(centred).toBe(n)
 })
