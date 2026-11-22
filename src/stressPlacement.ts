@@ -596,6 +596,7 @@ class Placer {
     anchorPts: Point[],
   ) {
     let chosen: Candidate | undefined
+    let uncrossed: Candidate | undefined
     let nodesClear: Candidate | undefined
     let best: Candidate | undefined
     let bestV = Infinity
@@ -606,11 +607,17 @@ class Placer {
       const slid = mapped.slid === true
       if (!slid || centreClear) {
         const v = this.violations(mapped.pts, exempt, anchorPts, bestV)
+        const links = mapped.links ?? []
         if (v === 0) {
-          if (this.linksClear(mapped.links ?? [], exempt, anchorPts)) {
+          if (this.linksClear(links, exempt, anchorPts)) {
             chosen = candidate
-          } else if (!slid) {
-            nodesClear ??= candidate
+          } else {
+            if (!links.some(link => this.crossesPlaced(link))) {
+              uncrossed ??= candidate
+            }
+            if (!slid) {
+              nodesClear ??= candidate
+            }
           }
         } else if (!slid && v < bestV) {
           bestV = v
@@ -621,7 +628,7 @@ class Placer {
         }
       }
     }
-    return (chosen ?? nodesClear ?? best!)(FINE_STEP)
+    return (chosen ?? uncrossed ?? nodesClear ?? best!)(FINE_STEP)
   }
 
   private linksClear(
@@ -631,9 +638,13 @@ class Placer {
   ) {
     return links.every(
       link =>
-        !this.chords.some(placed => crosses(link, placed)) &&
+        !this.crossesPlaced(link) &&
         this.violations(sampled(link, COARSE_STEP), exempt, anchorPts, 1) === 0,
     )
+  }
+
+  private crossesPlaced(link: Chord) {
+    return this.chords.some(placed => crosses(link, placed))
   }
 
   private anchorsOf(members: number[]): Anchor[] {

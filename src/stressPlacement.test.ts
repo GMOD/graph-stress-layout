@@ -234,7 +234,11 @@ const distanceToSegment = (
 
 // every allele's two links pass more than `clear` from every other allele's
 // nodes and cross neither those nodes nor their links
-function expectLinksClear(request: StressRequest, alleles: Allele[]) {
+function expectLinksClear(
+  request: StressRequest,
+  alleles: Allele[],
+  clear = 10,
+) {
   const { points } = placed(request)
   const drawn = alleles.map(([id, , from, to]) => {
     const pts = points(id)
@@ -255,7 +259,7 @@ function expectLinksClear(request: StressRequest, alleles: Allele[]) {
       for (const [a, b] of s.links) {
         expect(segmentsCross([a!, b!], t.path)).toBe(false)
         for (const p of t.pts) {
-          expect(distanceToSegment(p, a!, b!)).toBeGreaterThan(10)
+          expect(distanceToSegment(p, a!, b!)).toBeGreaterThan(clear)
         }
       }
     }
@@ -358,4 +362,32 @@ test('equal alleles over one gap hang stacked under its centre', () => {
     expect((allele[0]!.x + allele.at(-1)!.x) / 2).toBeCloseTo(400)
   }
   expect(Math.abs(lowest(p) - lowest(q))).toBeGreaterThanOrEqual(15)
+})
+
+test('a deletion over one that dropped to clear its own links hangs below it, its links crossing none', () => {
+  const alleles: Allele[] = [
+    ['outer', 5, 'left', 'right'],
+    ['inner', 5, 'a', 'd'],
+    ['innermost', 5, 'b', 'c'],
+    ['beside', 5, 'p', 'a'],
+  ]
+  const points = expectLinksClear(
+    bubbles(
+      [
+        ['left', 50],
+        ['p', 10],
+        ['q', 5],
+        ['a', 30],
+        ['b', 5],
+        ['g', 10],
+        ['c', 5],
+        ['d', 5],
+        ['right', 50],
+      ],
+      alleles,
+    ),
+    alleles,
+    0,
+  )
+  expect(lowest(points('outer'))).toBeGreaterThan(highest(points('inner')))
 })
