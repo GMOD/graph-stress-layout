@@ -44,11 +44,16 @@ const { nodePositions } = stressLayout(
   gap, a longer one as a teardrop, a node whose id starts with `ROUTE_ID` as a
   deletion's arch, and nested pieces on the outside of their parent's curve
 - A component with no backbone gets a stress layout by stochastic gradient
-  descent (Zheng, Pawar & Goodman 2019). As in odgi's path-guided SGD, random
+  descent ([Zheng, Pawar & Goodman 2019](#references)). As in odgi's path-guided SGD ([Heumos et al. 2024](#references)), random
   walks along the graph set the target distances, so the layout draws a repeat's
   loop as a ring whose circumference is the loop's drawn length
 - `stressLayout` reads `quality` (0 to 4, default 2), `seed` (default 1) and
   `componentSeparation` (default 15) from its second argument or from `options`
+
+## References
+
+- Zheng, J. X., Pawar, S., & Goodman, D. F. (2019). Graph drawing by stochastic gradient descent. _IEEE Transactions on Visualization and Computer Graphics_, 25(9), 2738–2748. https://doi.org/10.1109/TVCG.2018.2859997
+- Heumos, S., Guarracino, A., Schmelzle, J.-N. M., Li, J., Zhang, Z., Hagmann, J., Nahnsen, S., Prins, P., & Garrison, E. (2024). Pangenome graph layout by Path-Guided Stochastic Gradient Descent. _Bioinformatics_, 40(7), btae363. https://doi.org/10.1093/bioinformatics/btae363
 
 ## See also
 
